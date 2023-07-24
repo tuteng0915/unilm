@@ -19,12 +19,15 @@ from einops import rearrange
 from timm.models.layers import trunc_normal_
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.registry import register_model
+from data_utils import parse_resize, resize_fn
 
 from modeling_finetune import VisionTransformer
 from norm_ema_quantizer import NormEMAVectorQuantizer
 
 import utils
 from vqkd_teacher import clip, get_dino_vit_base
+from vqkd_teacher.openclip_vemb import Pix2StructOpenClipVemb
+
 
 class VQKD(nn.Module):
     def __init__(self,
@@ -35,13 +38,12 @@ class VQKD(nn.Module):
                  decay=0.99,
                  process_type='default',
                  quantize_kmeans_init=True,
-                 teacher_model_type='clip',
                  decoder_out_dim=512,
                  rec_loss_type='cosine',
                  **kwargs
                  ):
         super().__init__()
-        print(kwargs)
+        # print(kwargs)
         if decoder_config['in_chans'] != embed_dim:
             print(f"Rewrite the in_chans in decoder from {decoder_config['in_chans']} to {embed_dim}")
             decoder_config['in_chans'] = embed_dim
@@ -61,27 +63,31 @@ class VQKD(nn.Module):
         self.token_shape = (encoder_config['img_size'] // self.patch_size, encoder_config['img_size'] // self.patch_size)
 
         ## Teacher model setting
-        self.teacher_model_type = teacher_model_type
+        # TODO hardcoding now
+        self.teacher_model_type = 'open_clip_pix2struct'
         self.decoder_out_dim = decoder_out_dim
         if self.teacher_model_type == 'clip':
             self.scaling_layer = ScalingLayerForClip()
-            self.teacher_model, _ = clip.load("ViT-B/16", device='cpu', jit=False)
+            self.teacher_model, _ = clip.load("ViT-B/16", device='cpu', jit=False, download_root="/zhangpai21/checkpoints/sdpm/")
             self.decoder_out_dim = 512
-
         elif self.teacher_model_type == 'dino':
             self.scaling_layer = ScalingLayerForIM()
             self.teacher_model = get_dino_vit_base()
             self.decoder_out_dim = 768
-
+        elif self.teacher_model_type == 'open_clip_pix2struct':
+            self.scaling_layer = ScalingLayerForBeit2()   # Data has already preprocessd as CLIP's type, so here we use
+            self.teacher_model = Pix2StructOpenClipVemb()
+            self.decoder_out_dim = 1024
         else:
             self.teacher_model = None
+        # print(self.teacher_model_type)
 
-        if self.teacher_model is not None:
-            for param in self.teacher_model.parameters():
-                param.requires_grad = False # fix teacher_model model
+        # if self.teacher_model is not None:
+        #     for param in self.teacher_model.parameters():
+        #         param.requires_grad = False # fix teacher_model model
 
-            self.teacher_model.eval()
-            self.teacher_input_size = kwargs.get('teacher_input_size', 224)
+        #     self.teacher_model.eval()
+        #     self.teacher_input_size = kwargs.get('teacher_input_size', 224)
 
         # task layer
         self.encode_task_layer = nn.Sequential(
@@ -114,18 +120,26 @@ class VQKD(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
             
+    # TODO hardcoding now
+    # @torch.jit.ignore
+    # def no_weight_decay(self):
+    #     return {'quantize.embedding.weight', 'decoder.cls_token', 'decoder.pos_embed', 
+    #             'encoder.cls_token', 'encoder.pos_embed'}
+
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'quantize.embedding.weight', 'decoder.cls_token', 'decoder.pos_embed', 
-                'encoder.cls_token', 'encoder.pos_embed'}
+        return {'quantize.embedding.weight', 'decoder.cls_token', 'decoder.col_pos_emb', 'decoder.row_pos_emb', 
+                'encoder.cls_token', 'encoder.col_pos_emb', 'encoder.row_pos_emb'}
+    
 
     @property
     def device(self):
         return self.decoder.cls_token.device
 
     def pre_process(self, data):
+        return data
+        # TODO: modify data_fn
         if self.process_type == 'default':
-            # TODO: modify for adapt
             data = data.to(self.device)
             if data.max() <= 1.:
                 data = data * 255.
@@ -149,24 +163,23 @@ class VQKD(nn.Module):
 
         return output
 
-    def encode(self, x):
-        encoder_features = self.encoder(x, return_patch_tokens=True)
+    def encode(self, x, position_ids, patch_shapes):
+        encoder_features = self.encoder(x, position_ids, patch_shapes, return_patch_tokens=True)
 
         with torch.cuda.amp.autocast(enabled=False):
             to_quantizer_features = self.encode_task_layer(encoder_features.type_as(self.encode_task_layer[-1].weight))
 
-        N = to_quantizer_features.shape[1]
-        h, w = int(math.sqrt(N)), int(math.sqrt(N))
+        n = to_quantizer_features.shape[1]
 
-        to_quantizer_features = rearrange(to_quantizer_features, 'b (h w) c -> b c h w', h=h, w=w) # reshape for quantizer
+        to_quantizer_features = rearrange(to_quantizer_features, 'b n c -> b c n', n=n) # reshape for quantizer
         quantize, loss, embed_ind = self.quantize(to_quantizer_features)
 
         return quantize, embed_ind, loss
     
-    def decode(self, quantize, **kwargs):
+    def decode(self, quantize, position_ids, patch_shapes, **kwargs):
         # reshape tokens to feature maps for patch embed in decoder
         # quantize = rearrange(quantize, 'b (h w) c -> b c h w', h=self.token_shape[0], w=self.token_shape[1])
-        decoder_features = self.decoder(quantize, return_patch_tokens=True)
+        decoder_features = self.decoder(quantize, position_ids, patch_shapes, return_patch_tokens=True)
         rec = self.decode_task_layer(decoder_features)
 
         return rec
@@ -176,13 +189,19 @@ class VQKD(nn.Module):
         return self.get_tokens(x, **kwargs)['token']
 
     @torch.no_grad()
-    def get_regress_target(self, x, **kwargs):
+    def get_regress_target(self, x, position_ids=None, patch_shapes=None, **kwargs):
 
-        norm_imgs = self.scaling_layer(x)
+        if self.scaling_layer:
+            norm_imgs = self.scaling_layer(x)
+        else:
+            norm_imgs = x
+
         if self.teacher_model_type == 'clip':
             target = self.teacher_model.encode_image(norm_imgs, return_all_tokens=True) @ self.teacher_model.visual.proj
         elif self.teacher_model_type == 'dino':
             target = self.teacher_model.forward(norm_imgs, return_patch_tokens=True)
+        elif self.teacher_model_type == 'open_clip_pix2struct':
+            target = self.teacher_model.dense_emb(norm_imgs, position_ids=position_ids, image_size=patch_shapes, format="normed_patch")
         else:
             raise NotImplementedError
 
@@ -198,17 +217,21 @@ class VQKD(nn.Module):
 
         return rec_loss
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, texts, position_ids, patch_shapes, **kwargs):
         """
-        x: shape [B, 3, H, W] in [0, 1]
+        x: shape [B, npatch, 3*patch^2] in [0, 1]
         """
-        x = self.pre_process(x) # rescale to [-1, 1]
+        # x = self.pre_process(x) # rescale to [-1, 1]
+        
+        # print(x.device)
 
-        target = self.get_regress_target(x, **kwargs)
+        target = self.get_regress_target(x, position_ids=position_ids, patch_shapes=patch_shapes, **kwargs)
 
-        quantize, embed_ind, emb_loss = self.encode(x)
-        xrec = self.decode(quantize)
-
+        quantize, embed_ind, emb_loss = self.encode(x, position_ids, patch_shapes)
+        quantize = torch.permute(quantize, [0, 2, 1])
+        # print(quantize.shape) # batch, codebook_dim, npatch
+        xrec = self.decode(quantize, position_ids, patch_shapes)
+        # print(xrec.shape)
         rec_loss = self.calculate_rec_loss(xrec, target)
         loss = emb_loss + rec_loss
 
@@ -240,8 +263,23 @@ class ScalingLayerForIM(nn.Module):
         inp = ((inp + 1.) * 127.5).clamp(0, 255.) / 255. # rescale to [0, 1.]
         return (inp - self.shift) / self.scale
 
+class ScalingLayerForBeit2(nn.Module):
+    def __init__(self):
+        super(ScalingLayerForBeit2, self).__init__()
+        self.register_buffer('shift', torch.Tensor([0.485, 0.456, 0.406])[None, None, None, None, :]) # scale for tokenizer with default prosscess type \in [-1, 1]
+        self.register_buffer('scale', torch.Tensor([0.229, 0.224, 0.225])[None, None, None, None, :])
+
+    def forward(self, inp):
+        # inp [batch, npatch, 3*patch*patch]
+        patch_size = int(math.sqrt(inp.shape[2] / 3))
+        inp = inp.view(inp.shape[0], inp.shape[1], patch_size, patch_size, 3)
+        inp = ((inp + 1.) * 127.5).clamp(0, 255.) / 255. # rescale to [0, 1.]
+        inp = (inp - self.shift) / self.scale
+        inp = inp.view(inp.shape[0], inp.shape[1], patch_size ** 2 * 3)
+        return inp
+
 def get_model_default_params():
-    return dict(img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12,  
+    return dict(img_size=224, patch_size=14, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12,  
                              mlp_ratio=4., qkv_bias=True,  qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., 
                              norm_layer=partial(nn.LayerNorm, eps=1e-6), init_values=0., use_abs_pos_emb=True, 
                              use_rel_pos_bias=False, use_shared_rel_pos_bias=False, use_mean_pooling=True, init_scale=0.001)

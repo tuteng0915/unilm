@@ -17,7 +17,7 @@ from typing import Iterable
 
 import torch
 import torch.nn as nn
-
+from data_utils import resize_fn
 import utils
 
 def train_one_epoch(model: torch.nn.Module, 
@@ -40,24 +40,34 @@ def train_one_epoch(model: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
         
-    if hasattr(model.module, 'quantize'):
+    if hasattr(model, 'quantize'):
         try:
-            model.module.quantize.reset_cluster_size(device)
+            model.quantize.reset_cluster_size(device)
             print("Reset the codebook statistic info in quantizer before each epoch")
         except:
             pass
         
-    for step, (batch, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for step, batch in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    # for step, batch in enumerate(data_loader):
         # assign learning rate & weight decay for each step
         it = start_steps + step  # global training iteration
         if lr_schedule_values is not None:
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group.get("lr_scale", 1.0)
-        images = batch.to(device, non_blocking=True)
+
+        images, texts, position_ids, patch_shapes = batch
+
+        # print(images)
+        # print(images.shape)
+        # print(position_ids.shape)
+        # print(images)
+
+        images = images.to(device, non_blocking=True)
+        position_ids = position_ids.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled=True):
-            loss, log_loss = model(images)
+            loss, log_loss = model(images, texts, position_ids, patch_shapes)
 
         loss_value = loss.item()
 
@@ -113,11 +123,11 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     
     # stat the codebook usage information
-    if hasattr(model.module, 'quantize'):
+    if hasattr(model, 'quantize'):
         try:
-            codebook_cluster_size = model.module.quantize._codebook.cluster_size
+            codebook_cluster_size = model.quantize._codebook.cluster_size
         except:
-            codebook_cluster_size = model.module.quantize.cluster_size
+            codebook_cluster_size = model.quantize.cluster_size
         zero_cnt = (codebook_cluster_size == 0).sum().item()
         train_stat = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
         train_stat['Unused_code'] = zero_cnt
@@ -134,14 +144,14 @@ def evaluate(data_loader, model, device, log_writer=None, epoch=None, args=None)
     # switch to evaluation mode
     model.eval()
 
-    if hasattr(model.module, 'quantize'):
+    if hasattr(model, 'quantize'):
         try:
-            model.module.quantize.reset_cluster_size(device)
+            model.quantize.reset_cluster_size(device)
             print("Reset the codebook statistic info in quantizer before testing")
         except:
             pass
 
-    for step, (batch, extra_info) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    for step, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         images = batch.to(device, non_blocking=True)
         loss, log_loss = model(images)
@@ -156,11 +166,11 @@ def evaluate(data_loader, model, device, log_writer=None, epoch=None, args=None)
     print("Averaged stats:", metric_logger)
 
     # stat the codebook usage information
-    if hasattr(model, 'module') and hasattr(model.module, 'quantize'):
+    if hasattr(model, 'quantize'):
         try:
-            codebook_cluster_size = model.module.quantize._codebook.cluster_size
+            codebook_cluster_size = model.quantize._codebook.cluster_size
         except:
-            codebook_cluster_size = model.module.quantize.cluster_size
+            codebook_cluster_size = model.quantize.cluster_size
         zero_cnt = (codebook_cluster_size == 0).sum().item()
         test_stat = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
         test_stat['unused_code'] = zero_cnt
@@ -181,7 +191,7 @@ def calculate_codebook_usage(data_loader, model, device, log_writer=None, epoch=
     codebook_num = args.codebook_n_emd
     codebook_cnt = torch.zeros(codebook_num, dtype=torch.float64).to(device)
 
-    for step, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    for step, images in enumerate(metric_logger.log_every(data_loader, 10, header)):
         images = images.to(device, non_blocking=True)
 
         outputs = utils.get_model(model).get_tokens(images)['token'].view(-1)

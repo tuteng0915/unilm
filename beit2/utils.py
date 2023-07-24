@@ -27,7 +27,7 @@ import argparse
 
 import torch
 import torch.distributed as dist
-from torch._six import inf
+from torch import inf
 
 from tensorboardX import SummaryWriter
 
@@ -196,6 +196,7 @@ class MetricLogger(object):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
+        return iterable
 
 
 class TensorboardLogger(object):
@@ -261,7 +262,9 @@ def is_dist_avail_and_initialized():
     return True
 
 
+# TODO
 def get_world_size():
+    return 1
     if not is_dist_avail_and_initialized():
         return 1
     return dist.get_world_size()
@@ -377,37 +380,39 @@ def _get_world_size_env():
 
 
 def init_distributed_mode(args):
-    if args.dist_on_itp:
-        args.rank = _get_rank_env()
-        args.world_size = _get_world_size_env()  # int(os.environ['OMPI_COMM_WORLD_SIZE'])
-        args.gpu = _get_local_rank_env()
-        args.dist_url = "tcp://%s:%s" % (os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'])
-        os.environ['LOCAL_RANK'] = str(args.gpu)
-        os.environ['RANK'] = str(args.rank)
-        os.environ['WORLD_SIZE'] = str(args.world_size)
-        # ["RANK", "WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "LOCAL_RANK"]
-    elif 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
-    else:
-        print('Not using distributed mode')
-        args.distributed = False
-        return
+    args.distributed = False
+    return
+    # if args.dist_on_itp:
+    #     args.rank = _get_rank_env()
+    #     args.world_size = _get_world_size_env()  # int(os.environ['OMPI_COMM_WORLD_SIZE'])
+    #     args.gpu = _get_local_rank_env()
+    #     args.dist_url = "tcp://%s:%s" % (os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'])
+    #     os.environ['LOCAL_RANK'] = str(args.gpu)
+    #     os.environ['RANK'] = str(args.rank)
+    #     os.environ['WORLD_SIZE'] = str(args.world_size)
+    #     # ["RANK", "WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "LOCAL_RANK"]
+    # elif 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+    #     args.rank = int(os.environ["RANK"])
+    #     args.world_size = int(os.environ['WORLD_SIZE'])
+    #     args.gpu = int(os.environ['LOCAL_RANK'])
+    # elif 'SLURM_PROCID' in os.environ:
+    #     args.rank = int(os.environ['SLURM_PROCID'])
+    #     args.gpu = args.rank % torch.cuda.device_count()
+    # else:
+    #     print('Not using distributed mode')
+    #     args.distributed = False
+    #     return
 
-    args.distributed = True
+    # args.distributed = True
 
-    torch.cuda.set_device(args.gpu)
-    args.dist_backend = 'nccl'
-    print('| distributed init (rank {}): {}, gpu {}'.format(
-        args.rank, args.dist_url, args.gpu), flush=True)
-    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                         world_size=args.world_size, rank=args.rank)
-    torch.distributed.barrier()
-    setup_for_distributed(args.rank == 0)
+    # torch.cuda.set_device(args.gpu)
+    # args.dist_backend = 'nccl'
+    # print('| distributed init (rank {}): {}, gpu {}'.format(
+    #     args.rank, args.dist_url, args.gpu), flush=True)
+    # torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+    #                                      world_size=args.world_size, rank=args.rank)
+    # torch.distributed.barrier()
+    # setup_for_distributed(args.rank == 0)
 
 
 def load_state_dict(model, state_dict, prefix='', ignore_missing="relative_position_index"):
@@ -533,7 +538,7 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_steps > 0:
         warmup_iters = warmup_steps
-    print("Set warmup steps = %d" % warmup_iters)
+    print("Set warmup steps = %d epochs = %d niter_per_ep = %d" %(warmup_iters, epochs, niter_per_ep))
     if warmup_epochs > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 

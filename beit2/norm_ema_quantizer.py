@@ -147,9 +147,10 @@ class NormEMAVectorQuantizer(nn.Module):
             self.cluster_size = self.cluster_size.to(device)
 
     def forward(self, z):
+        # TODO Hardcoding now
         # reshape z -> (batch, height, width, channel) and flatten
         #z, 'b c h w -> b h w c'
-        z = rearrange(z, 'b c h w -> b h w c')
+        z = rearrange(z, 'b c n -> b n c')
         z = l2norm(z)
         z_flattened = z.reshape(-1, self.codebook_dim)
         
@@ -201,6 +202,6 @@ class NormEMAVectorQuantizer(nn.Module):
 
         # reshape back to match original input shape
         #z_q, 'b h w c -> b c h w'
-        z_q = rearrange(z_q, 'b h w c -> b c h w')
+        z_q = rearrange(z_q, 'b n c -> b c n')
         return z_q, loss, encoding_indices
     

@@ -223,8 +223,38 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class RelativePositionBias(nn.Module):
+class PatchEmbed_Linear(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, input_dim, output_dim):
+        super().__init__()        
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        # TODO
+        self.proj = nn.Linear(input_dim, output_dim)
 
+    def forward(self, x, **kwargs):
+        # TODO Whether use patchnorm
+        # x = F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        x = self.proj(x)
+        return x
+
+
+# class PatchEmbed_2d(nn.Module):
+#     """ Image to Patch Embedding
+#     """
+#     def __init__(self, patch_num=400, patch_size=14, in_chans=3, embed_dim=768):
+#         super().__init__()        
+#         self.patch_size = to_2tuple(patch_size)
+#         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=self.patch_size, stride=self.patch_size)
+
+#     def forward(self, x, **kwargs):
+#         B, C, H, W = x.shape
+#         x = self.proj(x).flatten(2).transpose(1, 2)
+#         return x
+
+
+class RelativePositionBias(nn.Module):
     def __init__(self, window_size, num_heads):
         super().__init__()
         self.window_size = window_size
@@ -265,26 +295,49 @@ class RelativePositionBias(nn.Module):
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+    def __init__(self, img_size=224, patch_size=14, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, init_values=None,
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
-                 use_mean_pooling=True, init_scale=0.001):
+                 use_mean_pooling=True, init_scale=0.001, use_2d_pos_emb=True, col_patch_num=400, row_patch_num=400, total_patch_num=400):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
 
-        self.patch_embed = PatchEmbed(
-            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
-        num_patches = self.patch_embed.num_patches
+        self.use_2d_pos_emb = use_2d_pos_emb
+        if not use_2d_pos_emb:
+            self.patch_embed = PatchEmbed(
+                img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)            
+        else:
+            self.patch_embed = PatchEmbed_Linear(input_dim=patch_size*patch_size*in_chans, output_dim=embed_dim)
+        
+        # print('patch_size*patch_size*in_chans', patch_size*patch_size*in_chans)
+
+        # TODO Do we need the [CLS] anymore?
+
+        self.in_chans = in_chans
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        if use_abs_pos_emb:
+
+        if use_2d_pos_emb:
+            self.total_patch_num=total_patch_num
+            self.col_patch_num=col_patch_num
+            self.row_patch_num=row_patch_num
+            self.col_pos_emb = nn.Embedding(col_patch_num+1, embed_dim, padding_idx=-1)
+            self.row_pos_emb = nn.Embedding(row_patch_num+1, embed_dim, padding_idx=-1)
+            # TODO do we need emb proj? or just simply '+'
+        elif use_abs_pos_emb: #默认为真
+            num_patches = self.patch_embed.num_patches
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+            self.col_pos_emb = None
+            self.row_pos_emb = None
         else:
             self.pos_embed = None
+            self.col_pos_emb = None
+            self.row_pos_emb = None
         self.pos_drop = nn.Dropout(p=drop_rate)
+
 
         if use_shared_rel_pos_bias:
             self.rel_pos_bias = RelativePositionBias(window_size=self.patch_embed.patch_shape, num_heads=num_heads)
@@ -303,8 +356,8 @@ class VisionTransformer(nn.Module):
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-        if self.pos_embed is not None:
-            trunc_normal_(self.pos_embed, std=.02)
+        # if self.pos_embed is not None:
+            # trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         # trunc_normal_(self.mask_token, std=.02)
         if isinstance(self.head, nn.Linear):
@@ -336,9 +389,14 @@ class VisionTransformer(nn.Module):
     def get_num_layers(self):
         return len(self.blocks)
 
+    # @torch.jit.ignore
+    # def no_weight_decay(self):
+    #     return {'pos_embed', 'cls_token'}
+
+    # FIXME hardcoding now
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed', 'cls_token'}
+        return {'col_pos_emb', 'row_pos_emb', 'cls_token'}
 
     def get_classifier(self):
         return self.head
@@ -360,6 +418,7 @@ class VisionTransformer(nn.Module):
         # we add a small number to avoid floating point error in the interpolation
         # see discussion at https://github.com/facebookresearch/dino/issues/8
         w0, h0 = w0 + 0.1, h0 + 0.1
+        # print(w0 / math.sqrt(N), h0 / math.sqrt(N))
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
             scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
@@ -367,22 +426,40 @@ class VisionTransformer(nn.Module):
         )
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        breakpoint()
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
 
-    def forward_features(self, x, return_patch_tokens=False, return_all_tokens=False, **kwargs):
-        B, nc, w, h = x.shape
-        x = self.patch_embed(x)
-        batch_size, seq_len, _ = x.size()  
+    def forward_features(self, x: torch.Tensor, position_ids, patch_shape, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        # print(x.shape)
+        batch_size, npatch, patch_input_dim = x.shape
+        patch_size = int(math.sqrt(patch_input_dim / self.in_chans))
         
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
 
-        x = torch.cat((cls_tokens, x), dim=1)
-        if self.pos_embed is not None:
-            if x.shape[1] != self.pos_embed.shape[1]:
-                x = x + self.interpolate_pos_encoding(x, w, h)
-            else:
-                x = x + self.pos_embed
+        x = self.patch_embed(x)
+        
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+
+        if self.use_2d_pos_emb:
+            assert self.row_pos_emb is not None
+            assert self.col_pos_emb is not None
+            
+            position_ids = torch.where(position_ids == -1, npatch, position_ids)
+            row_embedding = self.row_pos_emb(position_ids[:, :, 0])
+            col_embedding = self.col_pos_emb(position_ids[:, :, 1])
+            position_embedding = col_embedding + row_embedding
+            x = x + position_embedding.to(x.dtype)
+
+            x = torch.cat((cls_tokens, x), dim=1)
+        else:
+            x = torch.cat((cls_tokens, x), dim=1)
+            if self.pos_embed is not None:
+                if x.shape[1] != self.pos_embed.shape[1]:
+                    # FIXME hardcoing now
+                    # w and h should be 14, 14 in the original implement
+                    x = x + self.interpolate_pos_encoding(x, w, h)
+                else:
+                    x = x + self.pos_embed
                 
         x = self.pos_drop(x)
 
@@ -407,8 +484,8 @@ class VisionTransformer(nn.Module):
             else:
                 return x[:, 0]
 
-    def forward(self, x, return_patch_tokens=False, return_all_tokens=False, **kwargs):
-        x = self.forward_features(x, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
+    def forward(self, x, position_ids, patch_shape,  return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        x = self.forward_features(x, position_ids, patch_shape, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
         x = self.head(x)
         return x
 
