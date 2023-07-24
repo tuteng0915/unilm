@@ -152,3 +152,5 @@ src/*.ipynb
 # yaml_dev/
 
 .amltconfig
+log/
+tmp/
