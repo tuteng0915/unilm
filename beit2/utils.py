@@ -45,13 +45,15 @@ def bool_flag(s):
     else:
         raise argparse.ArgumentTypeError("invalid value for a boolean flag")
 
+
 def get_model(model):
     if isinstance(model, torch.nn.DataParallel) \
-      or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            or isinstance(model, torch.nn.parallel.DistributedDataParallel):
         return model.module
     else:
         return model
-            
+
+
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
     window or the global series average.
@@ -159,7 +161,11 @@ class MetricLogger(object):
         end = time.time()
         iter_time = SmoothedValue(fmt='{avg:.4f}')
         data_time = SmoothedValue(fmt='{avg:.4f}')
-        space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
+        try:
+            iterable_len = len(iterable)
+        except Exception:
+            iterable_len = 0
+        space_fmt = ':' + str(len(str(iterable_len))) + 'd'
         log_msg = [
             header,
             '[{0' + space_fmt + '}/{1}]',
@@ -176,18 +182,18 @@ class MetricLogger(object):
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
-            if i % print_freq == 0 or i == len(iterable) - 1:
-                eta_seconds = iter_time.global_avg * (len(iterable) - i)
+            if i % print_freq == 0 or i == iterable_len - 1:
+                eta_seconds = iter_time.global_avg * (iterable_len - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
                     print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
+                        i, iterable_len, eta=eta_string,
                         meters=str(self),
                         time=str(iter_time), data=str(data_time),
                         memory=torch.cuda.max_memory_allocated() / MB))
                 else:
                     print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
+                        i, iterable_len, eta=eta_string,
                         meters=str(self),
                         time=str(iter_time), data=str(data_time)))
             i += 1
@@ -195,7 +201,7 @@ class MetricLogger(object):
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)))
+            header, total_time_str, total_time / iterable_len))
         return iterable
 
 
@@ -218,13 +224,13 @@ class TensorboardLogger(object):
                 v = v.item()
             assert isinstance(v, (float, int))
             self.writer.add_scalar(head + "/" + k, v, self.step if step is None else step)
-    
+
     def update_image(self, head='images', step=None, **kwargs):
         for k, v in kwargs.items():
             if v is None:
                 continue
             self.writer.add_image(head + "/" + k, v, self.step if step is None else step)
-            
+
     def flush(self):
         self.writer.flush()
 
@@ -284,6 +290,7 @@ def save_on_master(*args, **kwargs):
     if is_main_process():
         torch.save(*args, **kwargs)
 
+
 def all_reduce(tensor, op=dist.ReduceOp.SUM, async_op=False):
     world_size = get_world_size()
 
@@ -292,6 +299,7 @@ def all_reduce(tensor, op=dist.ReduceOp.SUM, async_op=False):
     dist.all_reduce(tensor, op=op, async_op=async_op)
 
     return tensor
+
 
 def all_gather_batch(tensors):
     """
@@ -317,6 +325,7 @@ def all_gather_batch(tensors):
     for tensor_all in tensor_list:
         output_tensor.append(torch.cat(tensor_all, dim=0))
     return output_tensor
+
 
 class GatherLayer(torch.autograd.Function):
     """
@@ -357,6 +366,7 @@ def all_gather_batch_with_grad(tensors):
     for tensor_all in tensor_list:
         output_tensor.append(torch.cat(tensor_all, dim=0))
     return output_tensor
+
 
 def _get_rank_env():
     if "RANK" in os.environ:
@@ -463,6 +473,7 @@ def load_state_dict(model, state_dict, prefix='', ignore_missing="relative_posit
     if len(error_msgs) > 0:
         print('\n'.join(error_msgs))
 
+
 def get_grad_norm(parameters, norm_type=2):
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
@@ -475,13 +486,15 @@ def get_grad_norm(parameters, norm_type=2):
     total_norm = total_norm ** (1. / norm_type)
     return total_norm
 
+
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
     def __init__(self):
         self._scaler = torch.cuda.amp.GradScaler()
 
-    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, layer_names=None):
+    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True,
+                 layer_names=None):
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
             if clip_grad is not None:
@@ -500,21 +513,21 @@ class NativeScalerWithGradNormCount:
     def state_dict(self):
         return self._scaler.state_dict()
 
-    def load_state_dict(self, state_dict): 
+    def load_state_dict(self, state_dict):
         self._scaler.load_state_dict(state_dict)
 
 
 def get_grad_norm_(parameters, norm_type: float = 2.0, layer_names=None) -> torch.Tensor:
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    
+
     parameters = [p for p in parameters if p.grad is not None]
-        
+
     norm_type = float(norm_type)
     if len(parameters) == 0:
         return torch.tensor(0.)
     device = parameters[0].grad.device
-    
+
     if norm_type == inf:
         total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
     else:
@@ -522,13 +535,13 @@ def get_grad_norm_(parameters, norm_type: float = 2.0, layer_names=None) -> torc
         layer_norm = torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters])
         total_norm = torch.norm(layer_norm, norm_type)
         # print(layer_norm.max(dim=0))
-        
+
         if layer_names is not None:
             if torch.isnan(total_norm) or torch.isinf(total_norm) or total_norm > 1.0:
                 value_top, name_top = torch.topk(layer_norm, k=5)
                 print(f"Top norm value: {value_top}")
                 print(f"Top norm name: {[layer_names[i][7:] for i in name_top.tolist()]}")
-        
+
     return total_norm
 
 
@@ -538,7 +551,7 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_steps > 0:
         warmup_iters = warmup_steps
-    print("Set warmup steps = %d epochs = %d niter_per_ep = %d" %(warmup_iters, epochs, niter_per_ep))
+    print("Set warmup steps = %d epochs = %d niter_per_ep = %d" % (warmup_iters, epochs, niter_per_ep))
     if warmup_epochs > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 
@@ -552,14 +565,15 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     return schedule
 
 
-def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema=None, optimizer_disc=None, save_ckpt_freq=1):
+def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema=None, optimizer_disc=None,
+               save_ckpt_freq=1):
     output_dir = Path(args.output_dir)
     epoch_name = str(epoch)
 
     if not getattr(args, 'enable_deepspeed', False):
         checkpoint_paths = [output_dir / 'checkpoint.pth']
         if epoch == 'best':
-            checkpoint_paths = [output_dir / ('checkpoint-%s.pth' % epoch_name),]
+            checkpoint_paths = [output_dir / ('checkpoint-%s.pth' % epoch_name), ]
         elif (epoch + 1) % save_ckpt_freq == 0:
             checkpoint_paths.append(output_dir / ('checkpoint-%s.pth' % epoch_name))
 
@@ -576,7 +590,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
 
             if model_ema is not None:
                 to_save['model_ema'] = get_state_dict(model_ema)
-                
+
             if optimizer_disc is not None:
                 to_save['optimizer_disc'] = optimizer_disc.state_dict()
 
@@ -585,11 +599,12 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
         client_state = {'epoch': epoch}
         if model_ema is not None:
             client_state['model_ema'] = get_state_dict(model_ema)
-        model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)           
+        model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)
+
 
 def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None, optimizer_disc=None):
     output_dir = Path(args.output_dir)
-    
+
     if not getattr(args, 'enable_deepspeed', False):
         # torch.amp
         if args.auto_resume and len(args.resume) == 0:
@@ -613,7 +628,7 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
                     args.resume, map_location='cpu', check_hash=True)
             else:
                 checkpoint = torch.load(args.resume, map_location='cpu')
-            model_without_ddp.load_state_dict(checkpoint['model']) # strict: bool=True, , strict=False
+            model_without_ddp.load_state_dict(checkpoint['model'])  # strict: bool=True, , strict=False
             print("Resume checkpoint %s" % args.resume)
             if 'optimizer' in checkpoint and 'epoch' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
@@ -643,6 +658,7 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
                 if model_ema is not None:
                     if args.model_ema:
                         _load_checkpoint_for_ema(model_ema, client_states['model_ema'])
+
 
 def create_ds_config(args):
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)

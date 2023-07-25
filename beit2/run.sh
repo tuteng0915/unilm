@@ -16,7 +16,8 @@ python run_vqkd_training.py \
     --warmup_epochs 1 \
     --warmup_steps 1024 \
     --epochs 4 \
-    --save_ckpt_freq 20 
+    --save_ckpt_freq 20 \
+    --lr 1e-3 \
 # python -m torch.distributed.launch --nproc_per_node=1 run_vqkd_training.py \
 #     --process_type laion \
 #     --train_interpolation bicubic \

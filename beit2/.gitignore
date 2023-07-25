@@ -154,3 +154,5 @@ src/*.ipynb
 .amltconfig
 log/
 tmp/
+
+.idea/
