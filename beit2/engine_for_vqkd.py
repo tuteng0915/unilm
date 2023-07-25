@@ -51,7 +51,7 @@ def train_one_epoch(model: torch.nn.Module,
     # for step, batch in enumerate(data_loader):
         # assign learning rate & weight decay for each step
         it = start_steps + step  # global training iteration
-        print('lr_schedule_values = ', lr_schedule_values[it])
+        # print('lr_schedule_values = ', lr_schedule_values[it])
         if lr_schedule_values is not None:
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:

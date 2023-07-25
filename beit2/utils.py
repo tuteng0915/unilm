@@ -552,12 +552,14 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     if warmup_steps > 0:
         warmup_iters = warmup_steps
     print("Set warmup steps = %d epochs = %d niter_per_ep = %d" % (warmup_iters, epochs, niter_per_ep))
-    if warmup_epochs > 0:
+    if warmup_epochs > 0 or warmup_steps > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
-    schedule = np.array(
-        [final_value + 0.5 * (base_value - final_value) * (1 + math.cos(math.pi * i / (len(iters)))) for i in iters])
+    # schedule = np.array(
+    #     [final_value + 0.5 * (base_value - final_value) * (1 + math.cos(math.pi * i / (len(iters)))) for i in iters])
+
+    schedule  = np.ones(len(iters)) * final_value + 0.5 * (base_value - final_value) * (1 + np.cos(iters * np.pi / (len(iters))))
 
     schedule = np.concatenate((warmup_schedule, schedule))
 
