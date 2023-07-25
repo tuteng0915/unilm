@@ -77,7 +77,7 @@ class VQKD(nn.Module):
         elif self.teacher_model_type == 'open_clip_pix2struct':
             self.scaling_layer = ScalingLayerForBeit2()   # Data has already preprocessd as CLIP's type, so here we use
             self.teacher_model = Pix2StructOpenClipVemb()
-            self.decoder_out_dim = 1024
+            self.decoder_out_dim = 768
         else:
             self.teacher_model = None
         # print(self.teacher_model_type)
