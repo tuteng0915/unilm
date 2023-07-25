@@ -430,7 +430,7 @@ class VisionTransformer(nn.Module):
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
 
-    def forward_features(self, x: torch.Tensor, position_ids, patch_shape, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+    def forward_features(self, x: torch.Tensor, position_ids, patch_shape, seq_lens, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         # print(x.shape)
         batch_size, npatch, patch_input_dim = x.shape
         patch_size = int(math.sqrt(patch_input_dim / self.in_chans))
@@ -484,8 +484,8 @@ class VisionTransformer(nn.Module):
             else:
                 return x[:, 0]
 
-    def forward(self, x, position_ids, patch_shape,  return_patch_tokens=False, return_all_tokens=False, **kwargs):
-        x = self.forward_features(x, position_ids, patch_shape, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
+    def forward(self, x, position_ids, patch_shape, seq_lens, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        x = self.forward_features(x, position_ids, patch_shape, seq_lens, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
         x = self.head(x)
         return x
 

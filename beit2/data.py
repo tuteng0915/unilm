@@ -428,7 +428,7 @@ def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokeni
     pipeline.extend([
         partial(resize_fn, size=(400, 14), resize_method='patch-crop-2', tokenizer=tokenizer),
         wds.rename(image="jpg;png;jpeg;webp", text="txt"),
-        wds.to_tuple("image", "text", "position_ids", "size"),
+        wds.to_tuple("image", "text", "position_ids", "size", 'seq_len'),
         wds.batched(args.batch_size, partial=not is_train)
     ])
 

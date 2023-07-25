@@ -163,8 +163,8 @@ class VQKD(nn.Module):
 
         return output
 
-    def encode(self, x, position_ids, patch_shapes):
-        encoder_features = self.encoder(x, position_ids, patch_shapes, return_patch_tokens=True)
+    def encode(self, x, position_ids, patch_shapes, seq_lens):
+        encoder_features = self.encoder(x, position_ids, patch_shapes, seq_lens, return_patch_tokens=True)
 
         with torch.cuda.amp.autocast(enabled=False):
             to_quantizer_features = self.encode_task_layer(encoder_features.type_as(self.encode_task_layer[-1].weight))
@@ -172,14 +172,14 @@ class VQKD(nn.Module):
         n = to_quantizer_features.shape[1]
 
         to_quantizer_features = rearrange(to_quantizer_features, 'b n c -> b c n', n=n) # reshape for quantizer
-        quantize, loss, embed_ind = self.quantize(to_quantizer_features)
+        quantize, loss, embed_ind = self.quantize(to_quantizer_features, position_ids)
 
         return quantize, embed_ind, loss
     
-    def decode(self, quantize, position_ids, patch_shapes, **kwargs):
+    def decode(self, quantize, position_ids, patch_shapes, seq_lens, **kwargs):
         # reshape tokens to feature maps for patch embed in decoder
         # quantize = rearrange(quantize, 'b (h w) c -> b c h w', h=self.token_shape[0], w=self.token_shape[1])
-        decoder_features = self.decoder(quantize, position_ids, patch_shapes, return_patch_tokens=True)
+        decoder_features = self.decoder(quantize, position_ids, patch_shapes, seq_lens, return_patch_tokens=True)
         rec = self.decode_task_layer(decoder_features)
 
         return rec
@@ -189,7 +189,7 @@ class VQKD(nn.Module):
         return self.get_tokens(x, **kwargs)['token']
 
     @torch.no_grad()
-    def get_regress_target(self, x, position_ids=None, patch_shapes=None, **kwargs):
+    def get_regress_target(self, x, position_ids=None, patch_shapes=None, seq_lens=None, **kwargs):
 
         if self.scaling_layer:
             norm_imgs = self.scaling_layer(x)
@@ -201,23 +201,24 @@ class VQKD(nn.Module):
         elif self.teacher_model_type == 'dino':
             target = self.teacher_model.forward(norm_imgs, return_patch_tokens=True)
         elif self.teacher_model_type == 'open_clip_pix2struct':
-            target = self.teacher_model.dense_emb(norm_imgs, position_ids=position_ids, image_size=patch_shapes, format="normed_patch")
+            target = self.teacher_model.dense_emb(norm_imgs, position_ids=position_ids, image_size=patch_shapes, seq_lens=seq_lens, format="normed_patch")
         else:
             raise NotImplementedError
 
         return target
 
-    def calculate_rec_loss(self, rec, target):  
+    def calculate_rec_loss(self, rec, target, position_ids):  
         if self.rec_loss_type == 'cosine':
+            pad_mask = torch.logical_not(torch.eq(position_ids[:, :, 0], -1))
             target = target / target.norm(dim=-1, keepdim=True)
             rec = rec / rec.norm(dim=-1, keepdim=True)
-            rec_loss = (1 - (target * rec).sum(-1)).mean()
+            rec_loss = ((1 - (target * rec).sum(-1)) * pad_mask).mean()
         else:
             raise NotImplementedError
 
         return rec_loss
 
-    def forward(self, x, texts, position_ids, patch_shapes, **kwargs):
+    def forward(self, x, texts, position_ids, patch_shapes, seq_lens, **kwargs):
         """
         x: shape [B, npatch, 3*patch^2] in [0, 1]
         """
@@ -225,14 +226,14 @@ class VQKD(nn.Module):
         
         # print(x.device)
 
-        target = self.get_regress_target(x, position_ids=position_ids, patch_shapes=patch_shapes, **kwargs)
+        target = self.get_regress_target(x, position_ids=position_ids, patch_shapes=patch_shapes, seq_lens=seq_lens, **kwargs)
 
-        quantize, embed_ind, emb_loss = self.encode(x, position_ids, patch_shapes)
+        quantize, embed_ind, emb_loss = self.encode(x, position_ids, patch_shapes, seq_lens)
         quantize = torch.permute(quantize, [0, 2, 1])
         # print(quantize.shape) # batch, codebook_dim, npatch
-        xrec = self.decode(quantize, position_ids, patch_shapes)
+        xrec = self.decode(quantize, position_ids, patch_shapes, seq_lens)
         # print(xrec.shape)
-        rec_loss = self.calculate_rec_loss(xrec, target)
+        rec_loss = self.calculate_rec_loss(xrec, target, position_ids)
         loss = emb_loss + rec_loss
 
         log = {}
@@ -266,16 +267,16 @@ class ScalingLayerForIM(nn.Module):
 class ScalingLayerForBeit2(nn.Module):
     def __init__(self):
         super(ScalingLayerForBeit2, self).__init__()
-        self.register_buffer('shift', torch.Tensor([0.485, 0.456, 0.406])[None, None, None, None, :]) # scale for tokenizer with default prosscess type \in [-1, 1]
-        self.register_buffer('scale', torch.Tensor([0.229, 0.224, 0.225])[None, None, None, None, :])
+        # self.register_buffer('shift', torch.Tensor([0.485, 0.456, 0.406])[None, None, None, None, :]) # scale for tokenizer with default prosscess type \in [-1, 1]
+        # self.register_buffer('scale', torch.Tensor([0.229, 0.224, 0.225])[None, None, None, None, :])
 
     def forward(self, inp):
         # inp [batch, npatch, 3*patch*patch]
-        patch_size = int(math.sqrt(inp.shape[2] / 3))
-        inp = inp.view(inp.shape[0], inp.shape[1], patch_size, patch_size, 3)
+        # patch_size = int(math.sqrt(inp.shape[2] / 3))
+        # inp = inp.view(inp.shape[0], inp.shape[1], patch_size, patch_size, 3)
         inp = ((inp + 1.) * 127.5).clamp(0, 255.) / 255. # rescale to [0, 1.]
-        inp = (inp - self.shift) / self.scale
-        inp = inp.view(inp.shape[0], inp.shape[1], patch_size ** 2 * 3)
+        # inp = (inp - self.shift) / self.scale
+        # inp = inp.view(inp.shape[0], inp.shape[1], patch_size ** 2 * 3)
         return inp
 
 def get_model_default_params():

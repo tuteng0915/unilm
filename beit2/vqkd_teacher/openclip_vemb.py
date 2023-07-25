@@ -51,7 +51,7 @@ class Pix2StructOpenClipVemb():
         self.model.to('cuda')
 
 
-    def dense_emb(self, x, position_ids, image_size, format="patch"):
+    def dense_emb(self, x, position_ids, image_size, seq_lens, format="patch"):
         # apply normalize to patch sequence
         if format == 'patch' or format == 'nhwc':
             x = ((x.view(-1, 3) - self.mean) / self.std).view(x.shape)
@@ -65,7 +65,7 @@ class Pix2StructOpenClipVemb():
         _, tokens = self.model.encode_image(x, position_ids=position_ids, image_size=image_size)
         # normalize
         # y = F.normalize(y, dim=-1)
-        tokens = F.normalize(tokens, dim=-1)
+        # tokens = F.normalize(tokens, dim=-1)
         return tokens
 
 if __name__ == "__main__":

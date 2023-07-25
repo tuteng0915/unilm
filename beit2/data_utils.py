@@ -124,6 +124,7 @@ def resize_fn(src, size=(224, 224), resize_method='fixed', tokenizer=None):
                 img = img.view(3, rows, lpatch, cols, lpatch).permute(1, 3, 2, 4, 0).contiguous()
                 img = img.view(-1, lpatch ** 2 * 3)
                 # pad to npatch
+                ret['seq_len'] = img.size(0)
                 img = torch.cat([img, torch.zeros(npatch - img.size(0), lpatch ** 2 * 3)],
                                 dim=0)  # [seqlen, patch^2 * 3]
                 ret['position_ids'] = torch.zeros(npatch, 2, dtype=torch.long) - 1

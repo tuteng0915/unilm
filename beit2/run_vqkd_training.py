@@ -211,21 +211,20 @@ def main(args):
     # global_rank = utils.get_rank()
     # sampler_rank = global_rank
     # num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
-    # if True:  # args.distributed:
-        
-        # sampler_train = torch.utils.data.DistributedSampler(
-        #     dataset_train, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
-        # )
-        # print("Sampler_train = %s" % str(sampler_train))
-        # if args.dist_eval:
-        #     if len(dataset_val) % num_tasks != 0:
-        #         print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-        #                 'This will slightly alter validation results as extra duplicate entries are added to achieve '
-        #                 'equal num of samples per-process.')
-        #     sampler_val = torch.utils.data.DistributedSampler(
-        #         dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-        # else:
-        #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    # if args.distributed:
+    #     sampler_train = torch.utils.data.DistributedSampler(
+    #         dataset_train, num_replicas=num_tasks, rank=sampler_rank, shuffle=True
+    #     )
+    #     print("Sampler_train = %s" % str(sampler_train))
+    #     if args.dist_eval:
+    #         if len(dataset_val) % num_tasks != 0:
+    #             print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+    #                     'This will slightly alter validation results as extra duplicate entries are added to achieve '
+    #                     'equal num of samples per-process.')
+    #         sampler_val = torch.utils.data.DistributedSampler(
+    #             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+    #     else:
+    #         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     # else:
     #     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)

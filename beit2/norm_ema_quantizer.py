@@ -146,7 +146,7 @@ class NormEMAVectorQuantizer(nn.Module):
             self.register_buffer('cluster_size', torch.zeros(self.num_tokens))
             self.cluster_size = self.cluster_size.to(device)
 
-    def forward(self, z):
+    def forward(self, z, position_ids):
         # TODO Hardcoding now
         # reshape z -> (batch, height, width, channel) and flatten
         #z, 'b c h w -> b h w c'
@@ -195,7 +195,8 @@ class NormEMAVectorQuantizer(nn.Module):
             norm_ema_inplace(self.embedding.weight, embed_normalized, self.decay)
 
         # compute loss for embedding
-        loss = self.beta * F.mse_loss(z_q.detach(), z) 
+        pad_mask = torch.logical_not(torch.eq(position_ids[:, :, 0], -1))
+        loss = self.beta * (F.mse_loss(z_q.detach(), z, reduction='none').mean(dim=2) * pad_mask).mean()
         
         # preserve gradients
         z_q = z + (z_q - z).detach()
