@@ -328,7 +328,60 @@ class ResampledShards2(IterableDataset):
             else:
                 yield dict(url=self.rng.choices(self.urls, weights=self.weights, k=1)[0])
 
-# TODO hardcoding now
+class ResampledShards2(IterableDataset):
+    """An iterable dataset yielding a list of urls."""
+
+    def __init__(
+        self,
+        urls,
+        weights=None,
+        nshards=sys.maxsize,
+        worker_seed=None,
+        deterministic=False,
+        epoch=-1,
+    ):
+        """Sample shards from the shard list with replacement.
+
+        :param urls: a list of URLs as a Python list or brace notation string
+        """
+        super().__init__()
+        urls, weights = expand_urls(urls, weights)
+        self.urls = urls
+        self.weights = weights
+        if self.weights is not None:
+            assert len(self.urls) == len(self.weights),\
+                f"Number of urls {len(self.urls)} and weights {len(self.weights)} should match."
+        assert isinstance(self.urls[0], str)
+        self.nshards = nshards
+        self.rng = random.Random()
+        self.worker_seed = worker_seed
+        self.deterministic = deterministic
+        self.epoch = epoch
+
+    def __iter__(self):
+        """Return an iterator over the shards."""
+        if isinstance(self.epoch, SharedEpoch):
+            epoch = self.epoch.get_value()
+        else:
+            # NOTE: this is epoch tracking is problematic in a multiprocess (dataloader workers or train)
+            # situation as different workers may wrap at different times (or not at all).
+            self.epoch += 1
+            epoch = self.epoch
+        if self.deterministic:
+            # reset seed w/ epoch if deterministic
+            if self.worker_seed is None:
+                # pytorch worker seed should be deterministic due to being init by arg.seed + rank + worker id
+                seed = pytorch_worker_seed(epoch)
+            else:
+                seed = self.worker_seed() + epoch
+            self.rng.seed(seed)
+        for _ in range(self.nshards):
+            if self.weights is None:
+                yield dict(url=self.rng.choice(self.urls))
+            else:
+                yield dict(url=self.rng.choices(self.urls, weights=self.weights, k=1)[0])
+
+
 def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokenizer=None):
     # input_shards = args.train_data if is_train else args.val_data
     if is_train:
@@ -372,19 +425,20 @@ def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokeni
     print("num_shards: ", num_shards)
     shared_epoch = SharedEpoch(epoch=epoch)  # create a shared epoch store to sync epoch to dataloader worker proc
 
+    args.train_data_upsampling_factors = None
     # TODO hardcoding now    
-    # if resampled:
-    #     pipeline = [ResampledShards2(
-    #         input_shards,
-    #         weights=args.train_data_upsampling_factors,
-    #         deterministic=True,
-    #         epoch=shared_epoch,
-    #     )]
-    # else:
-    #     assert args.train_data_upsampling_factors is None,\
-    #         "--train_data_upsampling_factors is only supported when sampling with replacement (with --dataset-resampled)."
-    #     pipeline = [wds.SimpleShardList(input_shards)]
-    pipeline = [wds.SimpleShardList(input_shards)]
+    if resampled:
+        pipeline = [ResampledShards2(
+            input_shards,
+            weights=args.train_data_upsampling_factors,
+            deterministic=True,
+            epoch=shared_epoch,
+        )]
+    else:
+        assert args.train_data_upsampling_factors is None,\
+            "--train_data_upsampling_factors is only supported when sampling with replacement (with --dataset-resampled)."
+        pipeline = [wds.SimpleShardList(input_shards)]
+    # pipeline = [wds.SimpleShardList(input_shards)]
 
 
 

@@ -40,9 +40,9 @@ def train_one_epoch(model: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
         
-    if hasattr(model, 'quantize'):
+    if hasattr(model.module, 'quantize'):
         try:
-            model.quantize.reset_cluster_size(device)
+            model.module.quantize.reset_cluster_size(device)
             print("Reset the codebook statistic info in quantizer before each epoch")
         except:
             pass
@@ -124,11 +124,11 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     
     # stat the codebook usage information
-    if hasattr(model, 'quantize'):
+    if hasattr(model.module, 'quantize'):
         try:
-            codebook_cluster_size = model.quantize._codebook.cluster_size
+            codebook_cluster_size = model.module.quantize._codebook.cluster_size
         except:
-            codebook_cluster_size = model.quantize.cluster_size
+            codebook_cluster_size = model.module.quantize.cluster_size
         zero_cnt = (codebook_cluster_size == 0).sum().item()
         train_stat = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
         train_stat['Unused_code'] = zero_cnt
@@ -145,9 +145,9 @@ def evaluate(data_loader, model, device, log_writer=None, epoch=None, args=None)
     # switch to evaluation mode
     model.eval()
 
-    if hasattr(model, 'quantize'):
+    if hasattr(model.module, 'quantize'):
         try:
-            model.quantize.reset_cluster_size(device)
+            model.module.quantize.reset_cluster_size(device)
             print("Reset the codebook statistic info in quantizer before testing")
         except:
             pass
@@ -167,11 +167,11 @@ def evaluate(data_loader, model, device, log_writer=None, epoch=None, args=None)
     print("Averaged stats:", metric_logger)
 
     # stat the codebook usage information
-    if hasattr(model, 'quantize'):
+    if hasattr(model.module, 'quantize'):
         try:
-            codebook_cluster_size = model.quantize._codebook.cluster_size
+            codebook_cluster_size = model.module.quantize._codebook.cluster_size
         except:
-            codebook_cluster_size = model.quantize.cluster_size
+            codebook_cluster_size = model.module.quantize.cluster_size
         zero_cnt = (codebook_cluster_size == 0).sum().item()
         test_stat = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
         test_stat['unused_code'] = zero_cnt

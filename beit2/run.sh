@@ -1,5 +1,4 @@
-export CUDA_VISIBLE_DEVICES=1,2,3,4
-python run_vqkd_training.py \
+python -m torch.distributed.launch --nproc_per_node=8 run_vqkd_training.py \
     --process_type laion \
     --train_interpolation bicubic \
     --min_crop_scale 0.08 \
@@ -17,6 +16,7 @@ python run_vqkd_training.py \
     --warmup_steps 4096 \
     --epochs 40 \
     --save_ckpt_freq 2 \
+    --dataset-resampled \
 # python -m torch.distributed.launch --nproc_per_node=1 run_vqkd_training.py \
 #     --process_type laion \
 #     --train_interpolation bicubic \

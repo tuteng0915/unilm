@@ -270,7 +270,7 @@ def is_dist_avail_and_initialized():
 
 # TODO
 def get_world_size():
-    return 1
+    # return 1
     if not is_dist_avail_and_initialized():
         return 1
     return dist.get_world_size()
@@ -389,7 +389,7 @@ def _get_world_size_env():
         return int(os.environ['OMPI_COMM_WORLD_SIZE'])
 
 
-def init_distributed_mode(args):    
+def init_distributed_mode(args):
     if args.dist_on_itp:
         args.rank = _get_rank_env()
         args.world_size = _get_world_size_env()  # int(os.environ['OMPI_COMM_WORLD_SIZE'])
