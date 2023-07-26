@@ -274,7 +274,7 @@ class ScalingLayerForBeit2(nn.Module):
         patch_size = int(math.sqrt(inp.shape[2] / 3))
         inp = inp.view(inp.shape[0], inp.shape[1], patch_size, patch_size, 3)
         inp = ((inp + 1.) * 127.5).clamp(0, 255.) / 255. # rescale to [0, 1.]
-        inp = (inp - self.shift) / self.scale
+        # inp = (inp - self.shift) / self.scale
         inp = inp.view(inp.shape[0], inp.shape[1], patch_size ** 2 * 3)
         return inp
 

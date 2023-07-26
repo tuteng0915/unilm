@@ -49,6 +49,7 @@ def parse_resize(img_bytes, h, w, method='fixed', arlist=None):
         num_feasible_cols = max(min(math.floor(scale * img.size[0] / lpatch), totalpatch), 1)
         target_height = max(num_feasible_rows * lpatch, 1)
         target_width = max(num_feasible_cols * lpatch, 1)
+        img = img.resize((round(img.size[0] * scale), round(img.size[1] * scale)))
         img = img.crop((0, 0, target_width, target_height))
     return img
 
@@ -115,7 +116,8 @@ def resize_fn(src, size=(224, 224), resize_method='fixed', tokenizer=None):
             # OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
             # normalize = Normalize(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD)
             # img = normalize(img)
-            img = ((img + 1.) * 127.5).clamp(0, 255.) / 255.  # [-1, 1]
+            img = (img + 1) / 2
+            # img = ((img + 1.) * 127.5).clamp(0, 255.) / 255.  # [-1, 1]
 
             if resize_method in ['patch-resize', 'patch-crop', 'patch-resize-2', 'patch-crop-2']:
                 # split image into patches

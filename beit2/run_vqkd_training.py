@@ -147,7 +147,7 @@ def get_args():
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     parser.add_argument('--workers', default=1, type=int)
-    
+    parser.add_argument('--dataset-resampled', action='store_true')
 
     return parser.parse_args()
 
@@ -202,15 +202,15 @@ def main(args):
     dataset_val = get_wds_dataset(args=args, preprocess_img=None, is_train=False, epoch=args.epochs, floor=False)
 
     # FIXME disable distribute now 
-    num_tasks = 1
-    global_rank = 0
-    sampler_rank = 0
-    num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
-
-    # num_tasks = utils.get_world_size()
-    # global_rank = utils.get_rank()
-    # sampler_rank = global_rank
+    # num_tasks = 1
+    # global_rank = 0
+    # sampler_rank = 0
     # num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
+
+    num_tasks = utils.get_world_size()
+    global_rank = utils.get_rank()
+    sampler_rank = global_rank
+    num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
     # if True:  # args.distributed:
         
         # sampler_train = torch.utils.data.DistributedSampler(
@@ -286,10 +286,11 @@ def main(args):
     optimizer = create_optimizer(args, model_without_ddp)
     loss_scaler = NativeScaler()
 
+    print(args.distributed, "www")
+    print(args.gpu)
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
-
     print("Use step level LR & WD scheduler!")
     lr_schedule_values = utils.cosine_scheduler(
         args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,
@@ -314,8 +315,8 @@ def main(args):
     start_time = time.time()
             
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            data_loader_train.sampler.set_epoch(epoch)
+        # if args.distributed:
+        #     data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch)
         train_stats = train_one_epoch(
