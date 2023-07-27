@@ -212,7 +212,10 @@ class VQKD(nn.Module):
             pad_mask = torch.logical_not(torch.eq(position_ids[:, :, 0], -1))
             target = target / target.norm(dim=-1, keepdim=True)
             rec = rec / rec.norm(dim=-1, keepdim=True)
-            rec_loss = ((1 - (target * rec).sum(-1)) * pad_mask).mean()
+            loss = ((1 - (target * rec).sum(-1)) * pad_mask).sum(dim=-1)
+            rec_loss = (loss / pad_mask.sum(dim=-1)).mean()
+            # breakpoint()
+            # rec_loss = ((1 - (target * rec).sum(-1)) * pad_mask).mean()
         else:
             raise NotImplementedError
 
