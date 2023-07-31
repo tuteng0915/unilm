@@ -385,8 +385,8 @@ class ResampledShards2(IterableDataset):
 def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokenizer=None):
     # input_shards = args.train_data if is_train else args.val_data
     if is_train:
-        # include_dirs=["/zhangpai21/webdataset/laion-aes/train","/zhangpai21/webdataset/laion-aes/train2"]
-        include_dirs=["/zhangpai21/webdataset/laion-aes/train"]
+        include_dirs=["/zhangpai21/webdataset/laion-aes/train","/zhangpai21/webdataset/laion-aes/train2"]
+        # include_dirs=["/zhangpai21/webdataset/laion-aes/train"]
         files = []
         for dir in include_dirs:
             files += glob.glob(dir + "/*.tar")
