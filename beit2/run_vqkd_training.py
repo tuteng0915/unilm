@@ -120,7 +120,6 @@ def get_args():
     parser.add_argument('--train_num_samples', default=None, type=int)
 
     # Eval
-    # FIXME distributed
     parser.add_argument('--val_num_samples', default=100, type=int)
      
     parser.add_argument('--dist_eval', action='store_true', default=False,
@@ -172,7 +171,6 @@ def get_model(args, **kwargs):
 
 
 def main(args):
-    # FIXME disable distribute now 
     utils.init_distributed_mode(args)
 
     print(args)
@@ -192,25 +190,14 @@ def main(args):
 
     # get dataset
 
-    # dataset_train = get_dataset_fn(is_train=True, args=args)
-    # if args.disable_eval:
-    #     dataset_val = None
-    # else:
-    #     dataset_val = get_dataset_fn(is_train=False, args=args)    
-    
     dataset_train = get_wds_dataset(args=args, preprocess_img=None, is_train=True, epoch=args.epochs, floor=False)
     dataset_val = get_wds_dataset(args=args, preprocess_img=None, is_train=False, epoch=args.epochs, floor=False)
-
-    # FIXME disable distribute now 
-    # num_tasks = 1
-    # global_rank = 0
-    # sampler_rank = 0
-    # num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
 
     num_tasks = utils.get_world_size()
     global_rank = utils.get_rank()
     sampler_rank = global_rank
     num_training_steps_per_epoch = dataset_train.dataloader.num_batches // num_tasks
+
     # if True:  # args.distributed:
         
         # sampler_train = torch.utils.data.DistributedSampler(
@@ -229,25 +216,6 @@ def main(args):
     # else:
     #     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
-
-    # data_loader_train = torch.utils.data.DataLoader(
-    #     dataset_train, sampler=sampler_train,
-    #     batch_size=args.batch_size,
-    #     num_workers=args.num_workers,
-    #     pin_memory=args.pin_mem,
-    #     drop_last=True,
-    # )
-    # if dataset_val is not None:
-    #     data_loader_val = torch.utils.data.DataLoader(
-    #         dataset_val, sampler=sampler_val,
-    #         batch_size=int(1.5 * args.batch_size),
-    #         num_workers=args.num_workers,
-    #         pin_memory=args.pin_mem,
-    #         drop_last=False
-    #     )
-    # else:
-    #     data_loader_val = None
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)

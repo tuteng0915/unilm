@@ -11,11 +11,11 @@ python -m torch.distributed.launch --nproc_per_node=8 run_vqkd_training.py \
     --batch_size 64 \
     --opt adamw \
     --opt_betas 0.9 0.99 \
-    --lr 2e-3 \
+    --lr 1e-3 \
     --weight_decay 1e-4  \
     --warmup_steps 4096 \
-    --epochs 40 \
-    --save_ckpt_freq 2 \
+    --epochs 8 \
+    --save_ckpt_freq 1 \
     --dataset-resampled \
 # python -m torch.distributed.launch --nproc_per_node=1 run_vqkd_training.py \
 #     --process_type laion \
