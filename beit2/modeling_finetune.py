@@ -119,7 +119,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(all_head_dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False):
+    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False, attn_mask=None):
         B, N, C = x.shape
         qkv_bias = None
         if self.q_bias is not None:
@@ -142,7 +142,13 @@ class Attention(nn.Module):
 
         if rel_pos_bias is not None:
             attn = attn + rel_pos_bias
-        
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
+                new_attn_mask.masked_fill_(attn_mask, float("-inf"))
+                attn_mask = new_attn_mask
+            attn += attn_mask
+
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -181,20 +187,20 @@ class Block(nn.Module):
         else:
             self.gamma_1, self.gamma_2 = None, None
 
-    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False):
+    def forward(self, x, attn_mask, rel_pos_bias=None, return_attention=False, return_qkv=False):
         if return_attention:
-            return self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_attention=True)
+            return self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_attention=True, attn_mask=attn_mask)
         if return_qkv:
-            y, qkv = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_qkv=return_qkv)
+            y, qkv = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_qkv=return_qkv, attn_mask=attn_mask)
             x = x + self.drop_path(self.gamma_1 * y)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
             return x, qkv
 
         if self.gamma_1 is None:
-            x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
+            x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
+            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, attn_mask=attn_mask))
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x
 
@@ -227,11 +233,11 @@ class PatchEmbed_Linear(nn.Module):
     """ Image to Patch Embedding
     """
     def __init__(self, input_dim, output_dim):
-        super().__init__()        
+        super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         # TODO
-        self.proj = nn.Linear(input_dim, output_dim)
+        self.proj = nn.Linear(input_dim, output_dim, bias=False)
 
     def forward(self, x, **kwargs):
         # TODO Whether use patchnorm
@@ -426,11 +432,10 @@ class VisionTransformer(nn.Module):
         )
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        breakpoint()
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
 
-    def forward_features(self, x: torch.Tensor, position_ids, patch_shape, seq_lens, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+    def forward_features(self, x: torch.Tensor, position_ids, patch_shape, seq_lens, pad_mask, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         # print(x.shape)
         batch_size, npatch, patch_input_dim = x.shape
         patch_size = int(math.sqrt(patch_input_dim / self.in_chans))
@@ -464,8 +469,14 @@ class VisionTransformer(nn.Module):
         x = self.pos_drop(x)
 
         rel_pos_bias = self.rel_pos_bias() if self.rel_pos_bias is not None else None
+
+        pad_mask = torch.cat([torch.ones((batch_size, 1), dtype=torch.bool, device=x.device), pad_mask], dim=1)
+        pad_mask = pad_mask.unsqueeze(1).expand(-1, npatch + 1, -1).unsqueeze(1)
+        attn_mask = torch.zeros_like(pad_mask, dtype=x.dtype, device=x.device)
+        attn_mask.masked_fill_(~pad_mask, float('-inf'))
+
         for blk in self.blocks:
-            x = blk(x, rel_pos_bias=rel_pos_bias)
+            x = blk(x, rel_pos_bias=rel_pos_bias, attn_mask=attn_mask)
 
         x = self.norm(x)
         if self.fc_norm is not None:
@@ -484,8 +495,8 @@ class VisionTransformer(nn.Module):
             else:
                 return x[:, 0]
 
-    def forward(self, x, position_ids, patch_shape, seq_lens, return_patch_tokens=False, return_all_tokens=False, **kwargs):
-        x = self.forward_features(x, position_ids, patch_shape, seq_lens, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
+    def forward(self, x, position_ids, patch_shape, seq_lens, pad_mask, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        x = self.forward_features(x, position_ids, patch_shape, seq_lens, pad_mask, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
         x = self.head(x)
         return x
 

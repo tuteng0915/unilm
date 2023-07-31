@@ -49,9 +49,13 @@ class Pix2StructOpenClipVemb():
         assert self.mean is not None
         self.model = model
         self.model.to('cuda')
+        self.mean = self.mean.to('cuda')
+        self.std = self.std.to('cuda')
+        # self.mean.to('cuda')
+        # self.std.to('cuda')
 
 
-    def dense_emb(self, x, position_ids, image_size, seq_lens, format="patch"):
+    def dense_emb(self, x, position_ids, image_size, seq_lens, pad_mask, format="normed_patch"):
         # apply normalize to patch sequence
         if format == 'patch' or format == 'nhwc':
             x = ((x.view(-1, 3) - self.mean) / self.std).view(x.shape)

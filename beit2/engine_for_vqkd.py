@@ -57,7 +57,7 @@ def train_one_epoch(model: torch.nn.Module,
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group.get("lr_scale", 1.0)
 
-        images, texts, position_ids, patch_shapes, seq_lens = batch
+        images, texts, position_ids, patch_shapes, seq_lens, pad_mask = batch
 
         # print(images)
         # print(images.shape)
@@ -68,7 +68,7 @@ def train_one_epoch(model: torch.nn.Module,
         position_ids = position_ids.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast(enabled=True):
-            loss, log_loss = model(images, texts, position_ids, patch_shapes, seq_lens)
+            loss, log_loss = model(images, texts, position_ids, patch_shapes, seq_lens, pad_mask)
 
         loss_value = loss.item()
 
