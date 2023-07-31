@@ -285,8 +285,7 @@ class ScalingLayerForBeit2(nn.Module):
 
         inp = (inp - self.shift) / self.scale
         inp = inp.view(inp.shape[0], inp.shape[1], patch_size ** 2 * 3)
-        breakpoint()
-        inp = inp * pad_mask
+        inp = inp * pad_mask.unsqueeze(-1)
         return inp
 
 def get_model_default_params():
