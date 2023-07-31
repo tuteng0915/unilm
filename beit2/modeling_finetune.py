@@ -332,8 +332,7 @@ class VisionTransformer(nn.Module):
             self.row_patch_num=row_patch_num
             self.col_pos_emb = nn.Embedding(col_patch_num+1, embed_dim, padding_idx=-1)
             self.row_pos_emb = nn.Embedding(row_patch_num+1, embed_dim, padding_idx=-1)
-            # TODO do we need emb proj? or just simply '+'
-        elif use_abs_pos_emb: #默认为真
+        elif use_abs_pos_emb:
             num_patches = self.patch_embed.num_patches
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
             self.col_pos_emb = None
@@ -457,6 +456,9 @@ class VisionTransformer(nn.Module):
 
             x = torch.cat((cls_tokens, x), dim=1)
         else:
+            raise NotImplementedError()
+            # No longer support
+            # w and h should be 14, 14 in the original implement
             x = torch.cat((cls_tokens, x), dim=1)
             if self.pos_embed is not None:
                 if x.shape[1] != self.pos_embed.shape[1]:
